@@ -1,6 +1,8 @@
 import streamlit as st
+import time
 from . import config, db
 
+# --- Tema ---
 def apply_theme():
     dark = st.session_state.get("dark_mode", False)
     bg = "#0e1117" if dark else "#ffffff"
@@ -49,66 +51,75 @@ def apply_theme():
     .flag {{
         font-size: 2rem;
     }}
-    .sidebar-collapsed .css-1d391kg {{ display: none; }}
+    .invoice-box {{
+        background: {card_bg};
+        padding: 20px;
+        border: 1px solid {border};
+        font-family: monospace;
+        white-space: pre-wrap;
+    }}
     </style>
     """, unsafe_allow_html=True)
 
-def toggle_sidebar():
-    if "sidebar_collapsed" not in st.session_state:
-        st.session_state.sidebar_collapsed = False
-    if st.session_state.sidebar_collapsed:
-        # Sidebar'ı tekrar göster
-        st.session_state.sidebar_collapsed = False
+# --- Oturum süresi kontrolü ---
+def check_session_timeout():
+    if "last_activity" not in st.session_state:
+        st.session_state.last_activity = time.time()
     else:
-        st.session_state.sidebar_collapsed = True
+        idle_time = time.time() - st.session_state.last_activity
+        if idle_time > 300:  # 5 dakika
+            st.warning("Oturum süresi doldu. Lütfen tekrar giriş yapın.")
+            for key in ["logged_in", "username", "user_data", "last_activity"]:
+                if key in st.session_state:
+                    del st.session_state[key]
+            st.rerun()
+    st.session_state.last_activity = time.time()
 
+# --- Rozet kontrolü ---
 def check_and_award_badges(username):
     user = db.get_user(username)
-    sims = db.load_user_simulations(username)
-    badges = user.get("badges", [])
+    badges = eval(user["badges"]) if user["badges"] else []
+    sims = [eval(s["data"]) for s in db.get_simulations(username)]
     new_badges = []
 
     if len(sims) >= 1 and "first_sim" not in badges:
         new_badges.append("first_sim")
-
     issues_used = {s["issue"] for s in sims}
     if len(issues_used) == len(config.ISSUES) and "explorer" not in badges:
         new_badges.append("explorer")
-
     strategies_used = {s["strategy"] for s in sims}
     if len(strategies_used) == len(config.STRATEGIES) and "strategist" not in badges:
         new_badges.append("strategist")
-
     if user["tier"] == "pro" and "pro_member" not in badges:
         new_badges.append("pro_member")
+    if user["credits"] > 0 and "credit_buyer" not in badges:
+        new_badges.append("credit_buyer")
 
     for b in new_badges:
         badges.append(b)
         st.toast(f"🏆 Rozet kazandınız: {config.BADGES[b]['name']}!", icon="🎉")
         st.balloons()
     if new_badges:
-        db.update_user(username, {"badges": badges})
+        db.update_user(username, {"badges": str(badges)})
 
+# --- Grafik verisi (SQLite'dan) ---
 def prepare_dashboard_charts(username):
-    sims = db.load_user_simulations(username)
-    # Aylık kullanım (son 6 ay)
+    sims = [eval(s["data"]) for s in db.get_simulations(username)]
     months = {}
-    for s in sims:
-        m = s["timestamp"][:7]
-        months[m] = months.get(m, 0) + 1
-    month_list = sorted(months.keys())[-6:]
-    counts = [months[m] for m in month_list]
-    # Ülke ve konu dağılımı
     country_freq = {}
     issue_freq = {}
     strategy_freq = {}
     for s in sims:
+        m = s["timestamp"][:7]
+        months[m] = months.get(m, 0) + 1
         c = s["country1"]
         country_freq[c] = country_freq.get(c, 0) + 1
         i = s["issue"]
         issue_freq[i] = issue_freq.get(i, 0) + 1
         strat = s["strategy"]
         strategy_freq[strat] = strategy_freq.get(strat, 0) + 1
+    month_list = sorted(months.keys())[-6:]
+    counts = [months[m] for m in month_list]
     return {
         "months": month_list,
         "month_counts": counts,
@@ -116,3 +127,15 @@ def prepare_dashboard_charts(username):
         "issue_freq": issue_freq,
         "strategy_freq": strategy_freq
     }
+
+# --- Fatura metni ---
+def generate_invoice(username, item, amount):
+    return f"""
+FATURA
+----------
+Tarih: {time.strftime('%Y-%m-%d %H:%M')}
+Müşteri: {username}
+Ürün: {item}
+Tutar: {amount} TL (mock)
+Bu bir simülasyon faturasıdır, gerçek değildir.
+"""
