@@ -1,70 +1,61 @@
 import streamlit as st
-import time
+import json
 from modules import config, engine, db, utils
 
 st.title("🌐 Diplomasi Simülatörü")
 user = st.session_state.user_data
 
-if not (user["tier"] == "pro" or user["usage_this_month"] < 3):
-    st.error("Bu ayki limitiniz doldu. Pro ile sınırsız simülasyon yapın.")
-    if st.button("Pro’ya Yükselt"):
-        st.switch_page("pages/4_💎_Upgrade.py")
-    st.stop()
+# Kullanım hakkı kontrolü
+if user["tier"] == "free":
+    allowed = 3 + user["credits"]
+    if user["usage_this_month"] >= allowed:
+        st.error("Tüm kullanım hakkınız doldu. Kredi alın veya Pro’ya geçin.")
+        if st.button("Kredi Al"):
+            st.switch_page("pages/5_🛒_Credits.py")
+        st.stop()
 
-with st.form("sim_form"):
-    col1, col2 = st.columns(2)
-    with col1:
+# Session state'te aktif simülasyonu tut
+if "sim_session" not in st.session_state:
+    st.session_state.sim_session = None
+
+if st.session_state.sim_session is None:
+    # Başlangıç formu
+    with st.form("new_sim"):
         c1 = st.selectbox("Ülke 1", list(config.COUNTRIES.keys()))
         c2 = st.selectbox("Ülke 2", list(config.COUNTRIES.keys()), index=1)
-    with col2:
         issue = st.selectbox("Konu", config.ISSUES)
         strategy = st.selectbox("Strateji", config.STRATEGIES)
-    run = st.form_submit_button("Simülasyonu Başlat")
+        if st.form_submit_button("Müzakereyi Başlat"):
+            ses = engine.SimulatorSession(c1, c2, issue, strategy)
+            st.session_state.sim_session = ses
+            st.rerun()
+else:
+    ses = st.session_state.sim_session
+    st.markdown(f"**{config.COUNTRIES[ses.country1]} {ses.country1}** vs **{config.COUNTRIES[ses.country2]} {ses.country2}**")
+    st.progress((ses.step-1)/ses.total_steps)
 
-if run:
-    # Çok adımlı ilerleme
-    progress = st.progress(0)
-    status = st.empty()
-    for i in range(3):
-        status.text(f"Adım {i+1}/3: {['Ön görüşme', 'Pozisyon belirleme', 'Anlaşma taslağı'][i]}")
-        time.sleep(0.5)
-        progress.progress((i+1)/3)
-    status.empty()
-    progress.empty()
-
-    # Simülasyonu çalıştır
-    sim = engine.run_multi_step_simulation(c1, c2, issue, strategy)
-    # Kullanımı artır ve kaydet
-    user["usage_this_month"] += 1
-    db.update_user(st.session_state.username, {"usage_this_month": user["usage_this_month"]})
-    st.session_state.user_data = db.get_user(st.session_state.username)
-    db.save_simulation(st.session_state.username, sim)
-    utils.check_and_award_badges(st.session_state.username)
-
-    # Kart tasarımı ile sonuç
-    st.markdown(f"""
-    <div class="card">
-        <h2>{config.COUNTRIES[sim['country1']]} {sim['country1']} vs {config.COUNTRIES[sim['country2']]} {sim['country2']}</h2>
-        <p><b>Konu:</b> {sim['issue']} | <b>Strateji:</b> <span style="color:#ff4b4b;">{sim['strategy']}</span></p>
-        <p><b>Sonuç:</b> {sim['result']}</p>
-        <hr>
-        <p><b>Analiz:</b> {sim['analysis']}</p>
-        <p><b>Toplam Skor:</b> {sim['total_score']}</p>
-        <p>📊 {', '.join(f'{k}: {v:+d}' for k,v in sim['metrics'].items())}</p>
-        <hr>
-        <h4>📖 Teori Kartı: {sim['theory']}</h4>
-        <p>{sim['theory_desc']}</p>
-        <p>📚 Önerilen Kaynak: {sim['resource']}</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Karşılaştırma butonu
-    if st.button("🔄 Aynı senaryoyu farklı stratejiyle karşılaştır"):
-        other_strategy = [s for s in config.STRATEGIES if s != strategy][0]
-        sim2 = engine.run_multi_step_simulation(c1, c2, issue, other_strategy)
-        db.save_simulation(st.session_state.username, sim2)
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown(f"**Strateji: {sim['strategy']}** – Skor: {sim['total_score']}")
-        with col2:
-            st.markdown(f"**Strateji: {sim2['strategy']}** – Skor: {sim2['total_score']}")
+    if not ses.finished:
+        st.subheader(f"Adım {ses.step}/{ses.total_steps}")
+        options = ses.get_options()
+        decision = st.radio("Kararınız:", options)
+        if st.button("Kararı Uygula"):
+            ses.apply_decision(decision)
+            if ses.finished:
+                # Simülasyonu bitir, kaydet
+                final = ses.get_final_result()
+                # Kullanım sayacı
+                user["usage_this_month"] += 1
+                db.update_user(st.session_state.username, {"usage_this_month": user["usage_this_month"]})
+                st.session_state.user_data = db.get_user(st.session_state.username)
+                # Kaydet
+                db.add_simulation(st.session_state.username, json.dumps(final), final["timestamp"])
+                db.log_action(st.session_state.username, "simulation_complete")
+                utils.check_and_award_badges(st.session_state.username)
+                st.session_state.sim_session = None
+                st.rerun()
+            else:
+                st.rerun()
+    else:
+        # Bu durum olmamalı, finished olduğunda otomatik resetlenir
+        st.session_state.sim_session = None
+        st.rerun()
