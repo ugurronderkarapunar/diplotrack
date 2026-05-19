@@ -2,6 +2,7 @@
 DiploTrack - Uluslararası İlişkiler Diplomasi Simülasyon SaaS (Streamlit MVP)
 Monetization: Freemium (aylık limit) → Pro abonelik (mock)
 Tek repo, harici servis yok, local JSON storage, session bazlı auth.
+Otomatik demo kullanıcı oluşturma eklendi.
 """
 
 import streamlit as st
@@ -17,14 +18,14 @@ DATA_DIR = Path("data")
 USERS_FILE = DATA_DIR / "users.json"
 SIMULATIONS_DIR = DATA_DIR / "simulations"
 
-# Sayfa yapılandırması
 st.set_page_config(page_title="DiploTrack", layout="wide")
 
 def init_data():
-    """Klasörleri ve kullanıcı dosyasını oluştur."""
+    """Klasörleri, kullanıcı dosyasını ve varsayılan demo kullanıcıyı oluştur."""
     DATA_DIR.mkdir(exist_ok=True)
     SIMULATIONS_DIR.mkdir(exist_ok=True)
     if not USERS_FILE.exists():
+        # İlk kez çalıştırılıyor, boş bir users.json oluştur
         with open(USERS_FILE, "w") as f:
             json.dump({}, f)
 
@@ -38,6 +39,19 @@ def save_users(users):
 
 def hash_password(pw: str) -> str:
     return hashlib.sha256(pw.encode()).hexdigest()
+
+def create_default_user():
+    """Eğer hiç kullanıcı yoksa demo kullanıcısı ekle."""
+    users = load_users()
+    if not users:
+        users["demo"] = {
+            "password": hash_password("demo123"),
+            "tier": "free",
+            "usage_this_month": 0,
+            "last_active_month": datetime.date.today().strftime("%Y-%m"),
+            "created_at": str(datetime.datetime.now())
+        }
+        save_users(users)
 
 def get_user_sim_dir(username: str) -> Path:
     d = SIMULATIONS_DIR / username
@@ -94,7 +108,6 @@ def can_run_simulation() -> bool:
     user = st.session_state["user_data"]
     if user["tier"] == "pro":
         return True
-    # free limit
     return user["usage_this_month"] < 3
 
 # ---------------------------- SİMÜLASYON MOTORU ----------------------------
@@ -166,6 +179,7 @@ def load_user_simulations(username):
 # ---------------------------- SAYFALAR ----------------------------
 def login_page():
     st.title("🔐 DiploTrack Giriş")
+    st.info("💡 İlk kez mi geliyorsunuz? Demo hesap ile hemen başlayın: **demo / demo123**")
     tab1, tab2 = st.tabs(["Giriş Yap", "Kayıt Ol"])
     with tab1:
         with st.form("login_form"):
@@ -215,7 +229,6 @@ def dashboard_page():
 
 def simulator_page():
     st.title("🌐 Diplomasi Simülatörü")
-    user = st.session_state["user_data"]
     if not can_run_simulation():
         st.error("Bu ayki simülasyon limitinize ulaştınız (3/3). Daha fazlası için Pro üyeliğe geçin.")
         if st.button("Pro’ya Yükselt"):
@@ -273,7 +286,8 @@ def upgrade_page():
 # ---------------------------- ANA UYGULAMA ----------------------------
 def main():
     init_data()
-    # Session state ilklendirme
+    create_default_user()  # Eğer hiç kullanıcı yoksa demo eklenir
+
     if "logged_in" not in st.session_state:
         st.session_state["logged_in"] = False
     if "page" not in st.session_state:
@@ -283,27 +297,36 @@ def main():
         login_page()
         return
 
-    # Giriş yapılmışsa sidebar navigasyon
+    # Sidebar navigasyon
+    page_map = {
+        "dashboard": "📊 Panel",
+        "simulator": "🌐 Simülatör",
+        "saved": "📁 Kayıtlar",
+        "upgrade": "💎 Pro Yükselt"
+    }
+    current_page_id = st.session_state.get("page", "dashboard")
+    page_names = list(page_map.values())
+    page_ids = list(page_map.keys())
+    default_index = page_ids.index(current_page_id) if current_page_id in page_ids else 0
+
     st.sidebar.title(f"👤 {st.session_state['username']}")
-    page = st.sidebar.radio(
+    selected_page_name = st.sidebar.radio(
         "Menü",
-        ["Panel", "Simülatör", "Kayıtlar", "Pro Yükselt"],
-        index=["panel", "simülatör", "kayıtlar", "pro yükselt"].index(
-            st.session_state["page"] if st.session_state["page"] in ["dashboard", "simulator", "saved", "upgrade"] else "dashboard"
-        ) if False else 0  # radio index otomatik eşleşsin
+        page_names,
+        index=default_index,
+        key="nav_radio"
     )
-    # Sayfa yönlendirme
-    if page == "Panel":
-        st.session_state["page"] = "dashboard"
+    selected_index = page_names.index(selected_page_name)
+    selected_page_id = page_ids[selected_index]
+    st.session_state["page"] = selected_page_id
+
+    if selected_page_id == "dashboard":
         dashboard_page()
-    elif page == "Simülatör":
-        st.session_state["page"] = "simulator"
+    elif selected_page_id == "simulator":
         simulator_page()
-    elif page == "Kayıtlar":
-        st.session_state["page"] = "saved"
+    elif selected_page_id == "saved":
         saved_page()
-    elif page == "Pro Yükselt":
-        st.session_state["page"] = "upgrade"
+    elif selected_page_id == "upgrade":
         upgrade_page()
 
     st.sidebar.markdown("---")
