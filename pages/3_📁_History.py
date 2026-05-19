@@ -1,17 +1,22 @@
 import streamlit as st
+import json
 from modules import db, config
 
-st.title("📁 Kayıtlı Simülasyonlar")
-sims = db.load_user_simulations(st.session_state.username)
+st.title("📁 Geçmiş Simülasyonlar")
+sims = db.get_simulations(st.session_state.username)
 if not sims:
     st.info("Henüz simülasyon yok.")
     st.stop()
 
-filtre_issue = st.selectbox("Konu Filtrele", ["Hepsi"] + config.ISSUES)
+filtre = st.selectbox("Konu Filtrele", ["Hepsi"] + config.ISSUES)
 for sim in sims:
-    if filtre_issue != "Hepsi" and sim["issue"] != filtre_issue:
+    data = json.loads(sim["data"])
+    if filtre != "Hepsi" and data["issue"] != filtre:
         continue
-    with st.expander(f"{config.COUNTRIES[sim['country1']]} {sim['country1']} vs {config.COUNTRIES[sim['country2']]} {sim['country2']} – {sim['issue']} ({sim['timestamp'][:10]})"):
-        st.markdown(f"**Strateji:** {sim['strategy']} | **Sonuç:** {sim['result']}")
-        st.markdown(f"**Analiz:** {sim['analysis']}")
-        st.markdown(f"**Teori:** {sim['theory']} – {sim['theory_desc']}")
+    with st.expander(f"{config.COUNTRIES[data['country1']]} vs {config.COUNTRIES[data['country2']]} – {data['issue']} ({sim['timestamp'][:10]})"):
+        st.write(f"**Strateji:** {data['strategy']}")
+        st.write(f"**Sonuç:** {data['result']}")
+        st.write(f"**Skor:** {data['total_score']}")
+        st.write(f"**Metrikler:** {data['metrics']}")
+        st.write(f"**Analiz:** {data['analysis']}")
+        st.write(f"**Teori:** {data['theory']} – {data['theory_desc']}")
