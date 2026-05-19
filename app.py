@@ -1,70 +1,73 @@
 import streamlit as st
-from pathlib import Path
 from modules import auth, db, utils
 
-# --- SAYFA KONFİGÜRASYONU ---
 st.set_page_config(page_title="DiploTrack", page_icon="🌐", layout="wide")
+utils.apply_theme()
+db.init_db()
 
-# --- VERİ BAŞLATMA ---
-db.init_data()
+# Otomatik demo ve öğretmen hesabı oluştur
 auth.create_default_user()
 
-# --- TEMAYI UYGULA ---
-utils.apply_theme()
-
-# --- SIDEBAR İŞLEMLERİ ---
-if "sidebar_collapsed" not in st.session_state:
-    st.session_state.sidebar_collapsed = False
-
-if st.session_state.sidebar_collapsed:
-    # Sidebar'ı tamamen gizlemek için CSS enjekte et
-    st.markdown("<style>section[data-testid='stSidebar'] { display: none; }</style>", unsafe_allow_html=True)
-
-# --- OTURUM KONTROLÜ ---
+# Oturum süresi kontrolü
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
 if not st.session_state.logged_in:
-    # Giriş sayfası (manuel olarak burada gösteriyoruz çünkü pages klasöründe çalışacak)
-    st.title("🔐 DiploTrack Giriş")
-    st.info("💡 Demo hesap: demo / demo123")
-    tab1, tab2 = st.tabs(["Giriş Yap", "Kayıt Ol"])
-    with tab1:
-        with st.form("login_form"):
-            uname = st.text_input("Kullanıcı Adı")
-            pw = st.text_input("Şifre", type="password")
-            if st.form_submit_button("Giriş"):
-                if auth.login_user(uname, pw):
-                    st.success("Başarılı!")
-                    st.rerun()
-                else:
-                    st.error("Hatalı kullanıcı adı veya şifre.")
-    with tab2:
-        with st.form("register_form"):
-            new_uname = st.text_input("Yeni Kullanıcı Adı")
+    # Giriş / Kayıt / Şifre Sıfırlama sayfası
+    page = st.radio("", ["Giriş Yap", "Kayıt Ol", "Şifremi Unuttum"], horizontal=True)
+
+    if page == "Giriş Yap":
+        st.title("🔐 Giriş Yap")
+        uname = st.text_input("Kullanıcı Adı")
+        pw = st.text_input("Şifre", type="password")
+        if st.button("Giriş"):
+            if auth.login_user(uname, pw):
+                st.success("Başarılı!")
+                st.rerun()
+            else:
+                st.error("Hatalı giriş.")
+
+    elif page == "Kayıt Ol":
+        st.title("📝 Kayıt Ol")
+        new_uname = st.text_input("Kullanıcı Adı")
+        new_pw = st.text_input("Şifre", type="password")
+        sq = st.selectbox("Güvenlik Sorusu", ["Evcil hayvanınızın adı?", "Doğduğunuz şehir?"])
+        sa = st.text_input("Cevap")
+        role = st.selectbox("Rol", ["student", "teacher"])
+        if st.button("Kayıt Ol"):
+            if auth.register_user(new_uname, new_pw, sq, sa, role):
+                st.success("Kayıt başarılı! Giriş yapabilirsiniz.")
+            else:
+                st.error("Kullanıcı adı alınmış.")
+
+    else:  # Şifremi Unuttum
+        st.title("🔑 Şifre Sıfırla")
+        uname = st.text_input("Kullanıcı Adınız")
+        user = db.get_user(uname)
+        if user:
+            st.write(f"Güvenlik Sorunuz: {user['security_question']}")
+            answer = st.text_input("Cevap")
             new_pw = st.text_input("Yeni Şifre", type="password")
-            if st.form_submit_button("Kayıt Ol"):
-                if auth.register_user(new_uname, new_pw):
-                    st.success("Kayıt başarılı! Lütfen giriş yapın.")
+            if st.button("Şifreyi Sıfırla"):
+                if auth.verify_security_answer(uname, answer):
+                    auth.reset_password(uname, new_pw)
+                    st.success("Şifre sıfırlandı! Giriş yapabilirsiniz.")
                 else:
-                    st.error("Bu kullanıcı adı alınmış.")
+                    st.error("Cevap yanlış.")
+        else:
+            st.error("Kullanıcı bulunamadı.")
     st.stop()
 
-# --- GİRİŞ YAPILDIKTAN SONRA ---
-# Sidebar düzenlemeleri
+# Giriş yapıldıysa sidebar
+utils.check_session_timeout()
 with st.sidebar:
-    if st.button("🌓 Aydınlık/Karanlık"):
+    st.write(f"👤 {st.session_state['username']} ({st.session_state['user_data']['role']})")
+    if st.button("🌓 Tema"):
         st.session_state.dark_mode = not st.session_state.get("dark_mode", False)
         st.rerun()
-    if st.button("⬅️ Sidebar'ı Gizle/Göster"):
-        utils.toggle_sidebar()
-        st.rerun()
-    st.write(f"👤 {st.session_state.username}")
     st.write("---")
     if st.button("Çıkış Yap"):
         auth.logout()
         st.rerun()
 
-# Streamlit'in pages/ klasöründeki sayfaları otomatik yönlendirmesi için boş bırakıyoruz.
-# pages/ içindeki her dosya sırayla menüde görünecek.
-# Kullanıcı girişi varsa buraya gelir, sayfa yüklenir.
+# pages/ otomatik yönlendirilir, bir şey yapmaya gerek yok.
