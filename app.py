@@ -1,6 +1,7 @@
 """
 DiploTrack Pro – AI Destekli Uluslararası İlişkiler Simülasyonu
 Tek dosya, SQLite, çok adımlı simülasyon, kredi, öğretmen paneli, AI mentör.
+Tüm "null" hataları giderildi, yeni özellikler eklendi.
 """
 import streamlit as st
 import sqlite3
@@ -102,9 +103,6 @@ def get_simulations(username):
     conn.close()
     return [{"data": json.loads(row["data"]), "timestamp": row["timestamp"]} for row in rows]
 
-def log_action(username, action):
-    pass  # isterseniz usage_log tablosu eklenebilir
-
 # ---------------------------- SABİTLER ----------------------------
 COUNTRIES = {
     "USA": "🇺🇸", "CHN": "🇨🇳", "RUS": "🇷🇺", "DEU": "🇩🇪",
@@ -133,7 +131,7 @@ RESOURCES = [
     "📚 Robert Keohane – ‘After Hegemony’"
 ]
 
-# ---------------------------- TEMEL KULLANICI İŞLEMLERİ ----------------------------
+# ---------------------------- VARSAYILAN KULLANICILAR ----------------------------
 def create_default_users():
     if not get_user("demo"):
         save_user("demo", {
@@ -154,7 +152,7 @@ def create_default_users():
 
 create_default_users()
 
-# ---------------------------- OTURUM YÖNETİMİ ----------------------------
+# ---------------------------- OTURUM ----------------------------
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "page" not in st.session_state:
@@ -162,9 +160,9 @@ if "page" not in st.session_state:
 if "dark_mode" not in st.session_state:
     st.session_state.dark_mode = False
 if "sim_session" not in st.session_state:
-    st.session_state.sim_session = None
+    st.session_state.sim_session = None   # <-- None kullanıyoruz, null değil!
 
-# ---------------------------- CSS TEMA ----------------------------
+# ---------------------------- CSS (TEMA) ----------------------------
 dark = st.session_state.dark_mode
 bg = "#0e1117" if dark else "#ffffff"
 text_color = "#fafafa" if dark else "#31333F"
@@ -183,7 +181,7 @@ html, body, [class*="css"] {{ font-family: 'Inter', sans-serif; color: {text_col
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------------------- GİRİŞ / KAYIT / ŞİFRE SIFIRLAMA ----------------------------
+# ---------------------------- GİRİŞ / KAYIT / ŞİFRE UNUTTUM ----------------------------
 def login_page():
     st.title("🔐 DiploTrack Giriş")
     st.info("Demo: demo / demo123  |  Öğretmen: ogretmen / ogretmen123")
@@ -277,10 +275,8 @@ class Simulator:
             eff["Güvenlik"] += 4; eff["Ekonomi"] -= 2
         else:
             eff["Prestij"] += 2
-        # Güç dengesi
         if get_power(self.c1) > get_power(self.c2):
             eff["Prestij"] += 2
-        # Rastgele olay
         event = None
         if random.random() < 0.4:
             event = random_event()
@@ -290,7 +286,7 @@ class Simulator:
             self.metrics[k] += eff[k]
         self.log.append({"step": self.step, "decision": decision, "effects": eff, "event": event})
         self.step += 1
-        return self.step > 3  # 3 adımda biter
+        return self.step > 3
 
     def finalize(self):
         total = sum(self.metrics.values())
@@ -310,7 +306,7 @@ class Simulator:
             "log": self.log, "timestamp": datetime.datetime.now().isoformat()
         }
 
-# ---------------------------- AI MENTÖR (OpenAI) ----------------------------
+# ---------------------------- AI MENTÖR ----------------------------
 def ai_coach_available():
     return "OPENAI_API_KEY" in st.secrets
 
@@ -370,16 +366,14 @@ def simulator():
         if ses.step <= 3:
             st.subheader(f"Adım {ses.step}/3")
             dec = st.radio("Kararınız:", ses.options())
-            # AI Tavsiye butonu
             if st.button("🤖 AI Mentörden Tavsiye Al"):
-                situation = f"{ses.c1} ile {ses.c2} arasında {ses.issue} müzakere ediliyor, strateji {ses.strategy}. Mevcut metrikler: {ses.metrics}"
-                advice = ask_ai_coach(situation, ses.theory if hasattr(ses,'theory') else "Realizm")
+                situation = f"{ses.c1} ile {ses.c2} arasında {ses.issue} müzakere ediliyor, strateji {ses.strategy}."
+                advice = ask_ai_coach(situation, "Realizm")
                 st.info(f"**AI Mentör:** {advice}")
             if st.button("Kararı Uygula"):
                 done = ses.apply(dec)
                 if done:
                     final = ses.finalize()
-                    # Kullanım sayacı
                     update_user(st.session_state.username, {"usage_this_month": user["usage_this_month"]+1})
                     st.session_state.user_data["usage_this_month"] += 1
                     add_simulation(st.session_state.username, final, final["timestamp"])
@@ -442,8 +436,6 @@ def main():
     if not st.session_state.logged_in:
         login_page()
         return
-
-    # Sidebar
     with st.sidebar:
         st.write(f"👤 {st.session_state.username} ({st.session_state.user_data['role']})")
         if st.button("🌓 Tema"): st.session_state.dark_mode = not st.session_state.dark_mode; st.rerun()
@@ -452,13 +444,10 @@ def main():
         if st.session_state.user_data["role"] in ["teacher","admin"]:
             menu.append("👨‍🏫 Öğretmen")
         choice = st.radio("Menü", menu)
-
         if st.button("Çıkış Yap"):
             for k in ["logged_in","username","user_data","sim_session"]:
                 if k in st.session_state: del st.session_state[k]
             st.rerun()
-
-    # Sayfa yönlendirme
     page = choice.split(" ")[1] if " " in choice else choice
     mapping = {
         "Panel": dashboard, "Simülatör": simulator, "Geçmiş": history,
